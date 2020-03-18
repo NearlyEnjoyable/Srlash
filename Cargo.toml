@@ -1,7 +1,19 @@
 [package]
 name = "srlash"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["NearlyEnjoyable <kalocsai.richard.r@gmail.com>"]
+description = "Animated splash screen"
 edition = "2018"
 
 [dependencies]
+clap = "*"
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+overflow-checks = true
+incremental = false
+debug-assertions = false
+panic = 'abort'
+lto = true
