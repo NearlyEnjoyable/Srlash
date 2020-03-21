@@ -4,10 +4,13 @@
     Reads file as frames which are separated.
 
     TODO: Maybe add caching to tmp
-    neofetch like statistics
-    listen to interrupts
-    Arguments: file; index of file, caching, Terminal sequences (Maybe more?: looping time)
+    neofetch like system statistics
+    Use raw libc for SIGTERM. It's a shame Rust stdlib is unable to do basic signalling :(
+    change color change ripple
+    Arguments: file, index, caching, Terminal sequences (Maybe more?: looping time)
 */
+
+use ctrlc;
 
 use std::process::Command;
 use std::thread;
@@ -15,8 +18,6 @@ use std::thread;
 use std::io::Read;
 use std::fmt::Write;
 use std::process::Stdio;
-
-use std::env;
 
 mod parse;
 
@@ -42,34 +43,43 @@ const TS: [&str; 18] = /* Terminal Sequences */ [
 
 ];
 
+const CLEAR_SCREEN: &str = "\x1b[2J";
+const HIDE_CURSOR: &str = "\x1b[?25l";
+const SHOW_CURSOR: &str = "\x1b[?25h";
+const REINIT_SCREEN: &str = "\x1bc";
+
 static mut WIDE: usize = 0;
 static mut TALL: usize = 0;
 
 fn main() {
     let (file, index, cache) = parse::cli();
     let output = String::from_utf8(Command::new("stty")
-            .arg("size")
-            .arg("-F")
-            .arg("/dev/stderr")
-            .stderr(Stdio::inherit())
-            .output()
-            .unwrap().stdout).unwrap();
-        let mut formatted_output = output.split_whitespace().map(|x| x.parse::<usize>().unwrap());
-        unsafe {
-            TALL = formatted_output.next().unwrap();
-            WIDE = formatted_output.next().unwrap();
-        }
+        .arg("size")
+        .arg("-F")
+        .arg("/dev/stderr")
+        .stderr(Stdio::inherit())
+        .output()
+        .unwrap().stdout).unwrap();
+    let mut formatted_output = output.split_whitespace().map(|x| x.parse::<usize>().unwrap());
+    unsafe {
+        TALL = formatted_output.next().unwrap();
+        WIDE = formatted_output.next().unwrap();
+    }
+
+    /* Set SIGTERM handler to restore cursor */
+    ctrlc::set_handler(move || {
+        println!("{}", REINIT_SCREEN);
+        std::process::exit(0);
+    }).expect("Error setting SIGTERM handler");
 
     let path = std::path::Path::new(&file); //TODO: default file location where binary is run from
     let art = parse::get_art(path, index); //Get the desired art
-    println!("\x1b[?25l"); // Hide terminal cursor
+    println!("{}", HIDE_CURSOR);
     match art {
         parse::Chunk::Picture(x) => draw(&x),
         parse::Chunk::Moving(y) => animate(y),
     }
-    println!("\x1b[?25h"); // Show cursor
-    Command::new("clear").spawn().expect("Program paniced"); // Call "clear" -> no artifacts
-
+    println!("{}", SHOW_CURSOR);
 }
 
 fn draw(art: &str) {
@@ -78,14 +88,14 @@ fn draw(art: &str) {
     let neg_line_num = art.lines().count() as isize * -1 ;
     let mut itr = TS.iter().cycle();
     let mut earlier_seq = TS[0];
-    print!("\x1b[2J");
+    print!("{}", CLEAR_SCREEN);
 
     let mut str_buf: String = String::with_capacity(art.len() + (neg_line_num * -13) as usize);
     loop { // TODO: Should rework cursor jumping with ANSI save cursor position.
         let seq = itr.next().unwrap();
         for frame_offset in neg_line_num..max as isize {
             str_buf.clear();
-            unsafe {print!("\x1b[2J\x1b[H{:\n>hpad$}","", hpad=TALL);}// clear screen and set cursor to home (0;0)
+            unsafe {print!("{}\x1b[H{:\n>hpad$}", CLEAR_SCREEN,"", hpad=TALL);}// clear screen and set cursor to home (0;0)
             for (line_offset, text) in art.lines().enumerate() {
                 let mut rand_buf: [u8; 1] = [0];
                 f.read_exact(&mut rand_buf[0..1]).unwrap();
@@ -110,12 +120,12 @@ fn draw(art: &str) {
 }
 
 fn animate(art: Vec<String>) {
-    print!("\x1b[2J");
+    print!("{}", CLEAR_SCREEN);
     loop {
         let art = &art;
         for i in art {
             thread::sleep(std::time::Duration::from_millis(300));
-            print!("{}\x1b[2J", i);
+            print!("{}{}", i, CLEAR_SCREEN);
         }
     }
 }
